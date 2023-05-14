@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"github.com/chyeh/pubip"
 	"github.com/cloudflare/cloudflare-go"
@@ -13,7 +12,6 @@ import (
 	"k8s.io/client-go/rest"
 	"net"
 	"os"
-	"strings"
 	"time"
 
 	"k8s.io/client-go/kubernetes"
@@ -74,45 +72,6 @@ func (c *CloudflareUpdater) updateDomain(domain string, ip net.IP) {
 
 	}
 }
-
-func (c *CloudflareUpdater) extractHostnames(jsonData string) ([]string, error) {
-	log.Infoln("Extracting hostnames from data")
-	var data []map[string]interface{}
-	err := json.Unmarshal([]byte(jsonData), &data)
-	if err != nil {
-		return nil, err
-	}
-
-	var hostnames []string
-	for _, entry := range data {
-		if rule, ok := entry["rule"].(string); ok {
-			if host, err := c.extractHostname(rule); err == nil {
-				if strings.HasSuffix(host, "."+c.Tld) {
-					hostnames = append(hostnames, strings.TrimSuffix(host, "."+c.Tld))
-				}
-			}
-		}
-	}
-	return hostnames, nil
-}
-
-func (c *CloudflareUpdater) extractHostname(rule string) (string, error) {
-	// split rule on backticks
-	parts := []rune(rule)
-	for i := 0; i < len(parts); i++ {
-		if parts[i] == '`' {
-			// extract the string between the backticks
-			j := i + 1
-			for ; j < len(parts) && parts[j] != '`'; j++ {
-			}
-			if j > i+1 {
-				return string(parts[i+1 : j]), nil
-			}
-		}
-	}
-	return "", fmt.Errorf("No hostname found in rule '%s'", rule)
-}
-
 func (c *CloudflareUpdater) updateHostnames() {
 	ip, err := pubip.Get()
 	if err != nil {
@@ -131,7 +90,7 @@ func (c *CloudflareUpdater) updateHostnames() {
 	}
 
 	for _, ingress := range ingresses.Items {
-		hostname, _ := ingress.Annotations["external-dns.alpha.kubernetes.io/hostname"]
+		hostname, _ := ingress.Annotations["cloudflare-ddns/hostname"]
 		c.updateDomain(hostname, ip)
 	}
 }
