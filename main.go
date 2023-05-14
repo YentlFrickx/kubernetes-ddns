@@ -8,7 +8,6 @@ import (
 	"github.com/rs/zerolog/log"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	"net"
@@ -82,9 +81,7 @@ func (c *CloudflareUpdater) updateHostnames() {
 		log.Error().Err(err).Msg("Couldn't get my IP address")
 	}
 
-	selector := labels.Set{"cloudflare-ddns/hostname": ""}.AsSelector()
-
-	ingresses, err := c.ClientSet.NetworkingV1().Ingresses("").List(context.Background(), metav1.ListOptions{LabelSelector: selector.String()})
+	ingresses, err := c.ClientSet.NetworkingV1().Ingresses("").List(context.Background(), metav1.ListOptions{})
 	if err != nil {
 		if errors.IsNotFound(err) {
 			log.Printf("No Ingress resources found in the cluster")
@@ -94,8 +91,12 @@ func (c *CloudflareUpdater) updateHostnames() {
 	}
 
 	for _, ingress := range ingresses.Items {
-		hostname, _ := ingress.Annotations["cloudflare-ddns/hostname"]
-		c.updateDomain(hostname, ip)
+		hostname, exists := ingress.Annotations["cloudflare-ddns/hostname"]
+		if exists {
+			c.updateDomain(hostname, ip)
+		} else {
+			log.Info().Msg("skipping ingress without annotation")
+		}
 	}
 }
 
