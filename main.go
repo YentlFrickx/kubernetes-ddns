@@ -10,13 +10,13 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/client-go/rest"
 	"net"
 	"os"
 	"strings"
 	"time"
 
 	"k8s.io/client-go/kubernetes"
-	ctrl "sigs.k8s.io/controller-runtime"
 )
 
 type CloudflareUpdater struct {
@@ -142,7 +142,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	config := ctrl.GetConfigOrDie()
+	config, _ := rest.InClusterConfig()
 	clientset := kubernetes.NewForConfigOrDie(config)
 
 	cloudflareUpdater := CloudflareUpdater{
