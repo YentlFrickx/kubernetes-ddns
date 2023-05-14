@@ -2,14 +2,15 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"github.com/chyeh/pubip"
 	"github.com/cloudflare/cloudflare-go"
-	log "github.com/sirupsen/logrus"
+	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/clientcmd"
 	"net"
 	"os"
 	"time"
@@ -28,6 +29,7 @@ func boolPointer(b bool) *bool {
 }
 
 func (c *CloudflareUpdater) updateDomain(domain string, ip net.IP) {
+	log.Info().Msgf("Updating %s", domain)
 	zoneIdentifier := cloudflare.ZoneIdentifier(os.Getenv("CF_ZONE_ID"))
 
 	records, _, err := c.CloudflareApi.ListDNSRecords(
@@ -35,7 +37,7 @@ func (c *CloudflareUpdater) updateDomain(domain string, ip net.IP) {
 		zoneIdentifier,
 		cloudflare.ListDNSRecordsParams{Name: domain + "." + c.Tld})
 	if err != nil {
-		log.Errorln(err)
+		log.Error().Err(err).Msg("Error listing dns records from cloudflare")
 	} else if len(records) == 0 {
 		params := cloudflare.CreateDNSRecordParams{
 			Type:    "A",
@@ -47,9 +49,9 @@ func (c *CloudflareUpdater) updateDomain(domain string, ip net.IP) {
 		}
 		_, err := c.CloudflareApi.CreateDNSRecord(context.Background(), zoneIdentifier, params)
 		if err != nil {
-			log.Errorln(err)
+			log.Error().Err(err).Msg("Error while creating DNS records")
 		}
-		log.Infoln("Created dns entry for " + domain)
+		log.Info().Msg("Created dns entry for " + domain)
 	} else if len(records) > 0 && records[0].Content != ip.String() {
 		if records[0].Comment == "Created from kubernetes" {
 			params := cloudflare.UpdateDNSRecordParams{
@@ -63,30 +65,32 @@ func (c *CloudflareUpdater) updateDomain(domain string, ip net.IP) {
 			}
 			_, err := c.CloudflareApi.UpdateDNSRecord(context.Background(), zoneIdentifier, params)
 			if err != nil {
-				log.Errorln(err)
+				log.Error().Err(err).Msg("Error while updating DNS records")
 			}
-			log.Infoln("Updated dns entry for " + domain)
+			log.Info().Msg("Updated dns entry for " + domain)
 		} else {
-			log.Warn("Domain not managed by ddns " + domain)
+			log.Warn().Msg("Domain not managed by ddns " + domain)
 		}
 
+	} else {
+		log.Debug().Msgf("Skipping domain since not modified %s", domain)
 	}
 }
 func (c *CloudflareUpdater) updateHostnames() {
 	ip, err := pubip.Get()
 	if err != nil {
-		fmt.Println("Couldn't get my IP address:", err)
+		log.Error().Err(err).Msg("Couldn't get my IP address")
 	}
 
 	selector := labels.Set{"cloudflare-ddns/hostname": ""}.AsSelector()
 
-	ingresses, err := c.ClientSet.NetworkingV1beta1().Ingresses("").List(context.Background(), metav1.ListOptions{LabelSelector: selector.String()})
+	ingresses, err := c.ClientSet.NetworkingV1().Ingresses("").List(context.Background(), metav1.ListOptions{LabelSelector: selector.String()})
 	if err != nil {
 		if errors.IsNotFound(err) {
 			log.Printf("No Ingress resources found in the cluster")
 			return
 		}
-		log.Error("Failed to list Ingress resources: %v", err)
+		log.Error().Err(err).Msg("Error fetching ingresses")
 	}
 
 	for _, ingress := range ingresses.Items {
@@ -96,12 +100,23 @@ func (c *CloudflareUpdater) updateHostnames() {
 }
 
 func main() {
+	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
+	zerolog.SetGlobalLevel(zerolog.DebugLevel)
+	log.Info().Msg("Starting ddns")
+
 	api, err := cloudflare.NewWithAPIToken(os.Getenv("CF_TOKEN"))
 	if err != nil {
-		log.Fatal(err)
+		log.Fatal().Err(err).Msg("CF_TOKEN missing")
 	}
 
-	config, _ := rest.InClusterConfig()
+	config, err := rest.InClusterConfig()
+	if err != nil {
+		kubeconfigPath := "./config"
+		config, err = clientcmd.BuildConfigFromFlags("", kubeconfigPath)
+		if err != nil {
+			log.Fatal().Msgf("Failed to get Kubernetes config: %v", err)
+		}
+	}
 	clientset := kubernetes.NewForConfigOrDie(config)
 
 	cloudflareUpdater := CloudflareUpdater{
