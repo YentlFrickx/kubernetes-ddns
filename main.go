@@ -28,7 +28,7 @@ func boolPointer(b bool) *bool {
 }
 
 func (c *CloudflareUpdater) updateDomain(domain string, ip net.IP) {
-	log.Info().Msgf("Updating %s", domain)
+	log.Debug().Msgf("Updating %s", domain)
 	zoneIdentifier := cloudflare.ZoneIdentifier(os.Getenv("CF_ZONE_ID"))
 
 	records, _, err := c.CloudflareApi.ListDNSRecords(
@@ -102,7 +102,7 @@ func (c *CloudflareUpdater) updateHostnames() {
 
 func main() {
 	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
-	zerolog.SetGlobalLevel(zerolog.DebugLevel)
+	zerolog.SetGlobalLevel(zerolog.InfoLevel)
 	log.Info().Msg("Starting ddns")
 
 	api, err := cloudflare.NewWithAPIToken(os.Getenv("CF_TOKEN"))
